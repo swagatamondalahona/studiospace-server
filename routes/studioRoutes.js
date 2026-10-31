@@ -1,10 +1,8 @@
+import express from "express";
+import Studio from "../models/Studio.js";
 
-const express = require("express");
 const router = express.Router();
 
-const Studio = require("../models/Studio");
-
-// Get Featured Studios (Top 6)
 router.get("/featured", async (req, res) => {
     try {
         const studios = await Studio.find()
@@ -25,4 +23,4 @@ router.get("/featured", async (req, res) => {
     }
 });
 
-module.exports = router;
+export default router;

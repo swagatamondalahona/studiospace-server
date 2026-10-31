@@ -1,33 +1,52 @@
-const studioRoutes = require("./routes/studioRoutes");
-const express = require("express");
-const cors = require("cors");
-const mongoose = require("mongoose");
-require("dotenv").config();
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import { toNodeHandler } from "better-auth/node";
+
+import { auth } from "./src/auth.js";
+import { connectDB } from "./src/config/database.js";
+import studioRoutes from "./routes/studioRoutes.js";
 
 const app = express();
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// MongoDB Connection
-mongoose
-    .connect(process.env.MONGODB_URI)
-    .then(() => {
-        console.log("MongoDB Connected Successfully!");
+app.use(
+    cors({
+        origin: [
+            "http://localhost:3000",
+            "https://studiospace-client-lime.vercel.app",
+        ],
+        credentials: true,
     })
-    .catch((error) => {
-        console.error("MongoDB Connection Error:", error.message);
-    });
+);
+
+// Better Auth route — express.json() এর আগে রাখতে হবে
+app.all("/api/auth/{*any}", toNodeHandler(auth));
+
+// অন্যান্য API-এর জন্য JSON middleware
+app.use(express.json());
 
 // Test API
 app.get("/", (req, res) => {
     res.send("StudioSpace Server is Running!");
 });
+
+// Studio API
 app.use("/api/studios", studioRoutes);
-// Server
+
+// Database connection এবং Server start
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-    console.log(`StudioSpace Server running on port ${PORT}`);
-});
+const startServer = async () => {
+    try {
+        await connectDB();
+
+        app.listen(PORT, () => {
+            console.log(`StudioSpace Server running on port ${PORT}`);
+        });
+    } catch (error) {
+        console.error("Server startup failed:", error.message);
+        process.exit(1);
+    }
+};
+
+startServer();
