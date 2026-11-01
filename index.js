@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { toNodeHandler } from "better-auth/node";
+import bookingRoutes from "./routes/bookingRoutes.js";
 
 import { auth } from "./src/auth.js";
 import { connectDB } from "./src/config/database.js";
@@ -31,7 +32,7 @@ app.get("/", (req, res) => {
 });
 
 // Studio API
-app.use("/api/studios", studioRoutes);
+app.use("/api/bookings", bookingRoutes);
 
 // Database connection এবং Server start
 const PORT = process.env.PORT || 5000;
