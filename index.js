@@ -1,12 +1,14 @@
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { toNodeHandler } from "better-auth/node";
+
 import bookingRoutes from "./routes/bookingRoutes.js";
+import studioRoutes from "./routes/studioRoutes.js";
 
 import { auth } from "./src/auth.js";
 import { connectDB } from "./src/config/database.js";
-import studioRoutes from "./routes/studioRoutes.js";
 
 const app = express();
 
@@ -20,10 +22,10 @@ app.use(
     })
 );
 
-// Better Auth route — express.json() এর আগে রাখতে হবে
+// Better Auth
 app.all("/api/auth/{*any}", toNodeHandler(auth));
 
-// অন্যান্য API-এর জন্য JSON middleware
+// JSON middleware
 app.use(express.json());
 
 // Test API
@@ -32,9 +34,11 @@ app.get("/", (req, res) => {
 });
 
 // Studio API
+app.use("/api/studios", studioRoutes);
+
+// Booking API
 app.use("/api/bookings", bookingRoutes);
 
-// Database connection এবং Server start
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {

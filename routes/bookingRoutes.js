@@ -7,7 +7,9 @@ import authMiddleware from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Create Booking
+// ==========================================
+// CREATE BOOKING
+// ==========================================
 router.post("/", authMiddleware, async (req, res) => {
     try {
         const {
@@ -61,7 +63,7 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Booking date cannot be in the past
+        // Prevent past-date booking
         const today = new Date().toISOString().slice(0, 10);
 
         if (bookingDate < today) {
@@ -82,8 +84,12 @@ router.post("/", authMiddleware, async (req, res) => {
         const [startHour, startMinute] = startTime.split(":").map(Number);
         const [endHour, endMinute] = endTime.split(":").map(Number);
 
-        const totalHours =
-            (endHour * 60 + endMinute - (startHour * 60 + startMinute)) / 60;
+        const totalMinutes =
+            endHour * 60 +
+            endMinute -
+            (startHour * 60 + startMinute);
+
+        const totalHours = totalMinutes / 60;
 
         if (totalHours < 1) {
             return res.status(400).json({
@@ -113,7 +119,7 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Check overlapping confirmed bookings
+        // Check overlapping Confirmed bookings
         const overlappingBooking = await Booking.findOne({
             studioId,
             bookingDate,
@@ -129,16 +135,17 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Calculate total price on the server
+        // Calculate price on the server
         const totalPrice = totalHours * studio.price;
 
+        // Create booking
         const newBooking = await Booking.create({
             studioId: studio._id,
             studioName: studio.name,
             studioImage: studio.image,
             customerName: req.user.name,
-            customerEmail: req.user.email,
-            ownerEmail: studio.ownerEmail,
+            customerEmail: req.user.email.toLowerCase(),
+            ownerEmail: studio.ownerEmail.toLowerCase(),
             bookingDate,
             startTime,
             endTime,
@@ -158,6 +165,80 @@ router.post("/", authMiddleware, async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to create booking.",
+        });
+    }
+});
+
+// ==========================================
+// GET MY BOOKINGS
+// ==========================================
+router.get("/my-bookings", authMiddleware, async (req, res) => {
+    try {
+        const bookings = await Booking.find({
+            customerEmail: req.user.email.toLowerCase(),
+        }).sort({ createdAt: -1 });
+
+        return res.status(200).json({
+            success: true,
+            data: bookings,
+        });
+    } catch (error) {
+        console.error("Get My Bookings Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch bookings.",
+        });
+    }
+});
+
+// ==========================================
+// CANCEL PENDING BOOKING
+// ==========================================
+router.patch("/:id/cancel", authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid booking ID.",
+            });
+        }
+
+        const booking = await Booking.findOne({
+            _id: id,
+            customerEmail: req.user.email.toLowerCase(),
+        });
+
+        if (!booking) {
+            return res.status(404).json({
+                success: false,
+                message: "Booking not found.",
+            });
+        }
+
+        if (booking.status !== "Pending") {
+            return res.status(400).json({
+                success: false,
+                message: "Only pending bookings can be cancelled.",
+            });
+        }
+
+        booking.status = "Cancelled";
+        await booking.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Booking cancelled successfully!",
+            data: booking,
+        });
+    } catch (error) {
+        console.error("Cancel Booking Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to cancel booking.",
         });
     }
 });
