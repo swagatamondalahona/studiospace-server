@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 import { MongoClient } from "mongodb";
 
@@ -9,7 +10,7 @@ if (!mongoURI) {
 
 export const mongoClient = new MongoClient(mongoURI);
 
-export const mongoDB = mongoClient.db();
+export const mongoDB = mongoClient.db("better-auth");
 
 export const connectDB = async () => {
     try {
@@ -17,6 +18,8 @@ export const connectDB = async () => {
         await mongoose.connect(mongoURI);
 
         console.log("MongoDB Connected Successfully!");
+        console.log("Connected Database:", mongoDB.databaseName);
+
     } catch (error) {
         console.error("MongoDB Connection Error:", error.message);
         process.exit(1);

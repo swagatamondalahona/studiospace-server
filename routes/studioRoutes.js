@@ -5,7 +5,25 @@ import Studio from "../models/Studio.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+// Get All Studios: Explore Studios Page
+router.get("/", async (req, res) => {
+    try {
+        const studios = await Studio.find().sort({ createdAt: -1 });
 
+        return res.status(200).json({
+            success: true,
+            count: studios.length,
+            data: studios,
+        });
+    } catch (error) {
+        console.error("Get All Studios Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch studios.",
+        });
+    }
+});
 // Get Featured Studios: Maximum 6
 router.get("/featured", async (req, res) => {
     try {

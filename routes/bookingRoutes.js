@@ -12,14 +12,8 @@ const router = express.Router();
 // ==========================================
 router.post("/", authMiddleware, async (req, res) => {
     try {
-        const {
-            studioId,
-            bookingDate,
-            startTime,
-            endTime,
-        } = req.body;
+        const { studioId, bookingDate, startTime, endTime } = req.body;
 
-        // Required fields validation
         if (!studioId || !bookingDate || !startTime || !endTime) {
             return res.status(400).json({
                 success: false,
@@ -27,7 +21,6 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Validate Studio ID
         if (!mongoose.isValidObjectId(studioId)) {
             return res.status(400).json({
                 success: false,
@@ -35,7 +28,6 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Validate date and time formats
         const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
         const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -50,7 +42,6 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Validate actual calendar date
         const parsedDate = new Date(`${bookingDate}T00:00:00.000Z`);
 
         if (
@@ -63,7 +54,6 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Prevent past-date booking
         const today = new Date().toISOString().slice(0, 10);
 
         if (bookingDate < today) {
@@ -73,7 +63,6 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Validate booking duration
         if (startTime >= endTime) {
             return res.status(400).json({
                 success: false,
@@ -98,7 +87,6 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Find Studio
         const studio = await Studio.findById(studioId);
 
         if (!studio) {
@@ -108,18 +96,23 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Prevent booking own Studio
-        if (
-            studio.ownerEmail.toLowerCase() ===
-            req.user.email.toLowerCase()
-        ) {
+        const userEmail = req.user.email.toLowerCase();
+        const ownerEmail = String(studio.ownerEmail || "").toLowerCase();
+
+        if (!ownerEmail) {
+            return res.status(400).json({
+                success: false,
+                message: "Studio host information is incomplete.",
+            });
+        }
+
+        if (ownerEmail === userEmail) {
             return res.status(403).json({
                 success: false,
                 message: "You cannot book your own studio.",
             });
         }
 
-        // Check overlapping Confirmed bookings
         const overlappingBooking = await Booking.findOne({
             studioId,
             bookingDate,
@@ -135,17 +128,15 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
 
-        // Calculate price on the server
         const totalPrice = totalHours * studio.price;
 
-        // Create booking
         const newBooking = await Booking.create({
             studioId: studio._id,
             studioName: studio.name,
             studioImage: studio.image,
             customerName: req.user.name,
-            customerEmail: req.user.email.toLowerCase(),
-            ownerEmail: studio.ownerEmail.toLowerCase(),
+            customerEmail: userEmail,
+            ownerEmail,
             bookingDate,
             startTime,
             endTime,
@@ -170,7 +161,7 @@ router.post("/", authMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// GET MY BOOKINGS
+// GET MY BOOKINGS (CUSTOMER)
 // ==========================================
 router.get("/my-bookings", authMiddleware, async (req, res) => {
     try {
@@ -193,9 +184,32 @@ router.get("/my-bookings", authMiddleware, async (req, res) => {
 });
 
 // ==========================================
-// CANCEL PENDING BOOKING
+// GET HOST BOOKINGS
 // ==========================================
-router.patch("/:id/cancel", authMiddleware, async (req, res) => {
+router.get("/host-bookings", authMiddleware, async (req, res) => {
+    try {
+        const bookings = await Booking.find({
+            ownerEmail: req.user.email.toLowerCase(),
+        }).sort({ createdAt: -1 });
+
+        return res.status(200).json({
+            success: true,
+            data: bookings,
+        });
+    } catch (error) {
+        console.error("Get Host Bookings Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch host bookings.",
+        });
+    }
+});
+
+// ==========================================
+// HOST CONFIRM BOOKING
+// ==========================================
+router.patch("/:id/confirm", authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -208,30 +222,169 @@ router.patch("/:id/cancel", authMiddleware, async (req, res) => {
 
         const booking = await Booking.findOne({
             _id: id,
-            customerEmail: req.user.email.toLowerCase(),
+            ownerEmail: req.user.email.toLowerCase(),
         });
 
         if (!booking) {
             return res.status(404).json({
                 success: false,
-                message: "Booking not found.",
+                message: "Booking not found or you are not the studio owner.",
             });
         }
 
         if (booking.status !== "Pending") {
             return res.status(400).json({
                 success: false,
-                message: "Only pending bookings can be cancelled.",
+                message: "Only pending bookings can be confirmed.",
             });
         }
 
-        booking.status = "Cancelled";
-        await booking.save();
+        // Check overlapping confirmed bookings before confirmation
+        const overlappingBooking = await Booking.findOne({
+            _id: { $ne: booking._id },
+            studioId: booking.studioId,
+            bookingDate: booking.bookingDate,
+            status: "Confirmed",
+            startTime: { $lt: booking.endTime },
+            endTime: { $gt: booking.startTime },
+        });
+
+        if (overlappingBooking) {
+            return res.status(409).json({
+                success: false,
+                message: "This time slot conflicts with another confirmed booking.",
+            });
+        }
+
+        // Update only if the booking is still Pending
+        const updatedBooking = await Booking.findOneAndUpdate(
+            {
+                _id: booking._id,
+                ownerEmail: req.user.email.toLowerCase(),
+                status: "Pending",
+            },
+            {
+                $set: { status: "Confirmed" },
+            },
+            {
+                new: true,
+                runValidators: true,
+            }
+        );
+
+        if (!updatedBooking) {
+            return res.status(409).json({
+                success: false,
+                message: "This booking has already been updated.",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Booking confirmed successfully!",
+            data: updatedBooking,
+        });
+    } catch (error) {
+        console.error("Confirm Booking Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to confirm booking.",
+        });
+    }
+});
+
+// ==========================================
+// HOST REJECT BOOKING
+// ==========================================
+router.patch("/:id/reject", authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid booking ID.",
+            });
+        }
+
+        const updatedBooking = await Booking.findOneAndUpdate(
+            {
+                _id: id,
+                ownerEmail: req.user.email.toLowerCase(),
+                status: "Pending",
+            },
+            {
+                $set: { status: "Cancelled" },
+            },
+            {
+                new: true,
+                runValidators: true,
+            }
+        );
+
+        if (!updatedBooking) {
+            return res.status(404).json({
+                success: false,
+                message: "Pending booking not found or you are not the studio owner.",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Booking rejected successfully!",
+            data: updatedBooking,
+        });
+    } catch (error) {
+        console.error("Reject Booking Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to reject booking.",
+        });
+    }
+});
+
+// ==========================================
+// CUSTOMER CANCEL PENDING BOOKING
+// ==========================================
+router.patch("/:id/cancel", authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid booking ID.",
+            });
+        }
+
+        const updatedBooking = await Booking.findOneAndUpdate(
+            {
+                _id: id,
+                customerEmail: req.user.email.toLowerCase(),
+                status: "Pending",
+            },
+            {
+                $set: { status: "Cancelled" },
+            },
+            {
+                new: true,
+                runValidators: true,
+            }
+        );
+
+        if (!updatedBooking) {
+            return res.status(404).json({
+                success: false,
+                message: "Pending booking not found or cannot be cancelled.",
+            });
+        }
 
         return res.status(200).json({
             success: true,
             message: "Booking cancelled successfully!",
-            data: booking,
+            data: updatedBooking,
         });
     } catch (error) {
         console.error("Cancel Booking Error:", error);
