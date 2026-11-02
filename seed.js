@@ -1,7 +1,5 @@
-
 import "dotenv/config";
-import mongoose from "mongoose";
-import Studio from "./models/Studio.js";
+import { MongoClient } from "mongodb";
 
 const studios = [
     {
@@ -146,19 +144,33 @@ const studios = [
 ];
 
 const seedDatabase = async () => {
-    try {
-        if (!process.env.MONGODB_URI) {
-            throw new Error("MONGODB_URI is missing from .env");
-        }
+    const mongoURI = process.env.MONGODB_URI;
+    if (!mongoURI) {
+        throw new Error("MONGODB_URI is missing from .env");
+    }
 
-        await mongoose.connect(process.env.MONGODB_URI);
-        console.log("MongoDB Connected!");
+    const client = new MongoClient(mongoURI);
+
+    try {
+        await client.connect();
+        console.log("Connected to MongoDB for seeding!");
+
+        const db = client.db(process.env.DB_NAME || "test");
+        const studiosCollection = db.collection("studios");
 
         for (const studio of studios) {
-            await Studio.updateOne(
+            await studiosCollection.updateOne(
                 { name: studio.name },
-                { $set: studio },
-                { upsert: true, runValidators: true }
+                {
+                    $set: {
+                        ...studio,
+                        updatedAt: new Date(),
+                    },
+                    $setOnInsert: {
+                        createdAt: new Date(),
+                    },
+                },
+                { upsert: true }
             );
         }
 
@@ -167,7 +179,7 @@ const seedDatabase = async () => {
         console.error("Seed Error:", error.message);
         process.exitCode = 1;
     } finally {
-        await mongoose.disconnect();
+        await client.close();
     }
 };
 
