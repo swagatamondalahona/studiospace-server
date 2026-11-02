@@ -4,7 +4,7 @@ import cors from "cors";
 import { MongoClient, ObjectId } from "mongodb";
 import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
-import { jwt } from "better-auth/plugins";
+import { jwt, bearer } from "better-auth/plugins";
 import { toNodeHandler, fromNodeHeaders } from "better-auth/node";
 
 const mongoURI = process.env.MONGODB_URI;
@@ -106,6 +106,9 @@ export const auth = betterAuth({
         jwt({
             sessionCookieCache: true,
         }),
+        bearer({
+            requireSignature: false,
+        }),
     ],
 });
 
@@ -150,8 +153,64 @@ app.use(
             return callback(new Error("Not allowed by CORS"));
         },
         credentials: true,
+        exposedHeaders: ["set-auth-token"],
     })
 );
+
+// Intercept OAuth callback redirect to attach token query parameter for cross-domain auth
+app.use((req, res, next) => {
+    if (req.path.startsWith("/api/auth/callback/")) {
+        const originalWriteHead = res.writeHead;
+        res.writeHead = function (statusCode, ...args) {
+            if (statusCode === 302 || statusCode === 307 || statusCode === 303) {
+                try {
+                    let setCookieHeader = res.getHeader("set-cookie");
+                    let locationHeader = res.getHeader("location");
+                    if (!locationHeader && args[0] && typeof args[0] === "object") {
+                        locationHeader = args[0].Location || args[0].location;
+                    }
+
+                    if (setCookieHeader && locationHeader) {
+                        const cookieStr = Array.isArray(setCookieHeader)
+                            ? setCookieHeader.join("; ")
+                            : String(setCookieHeader);
+
+                        const match = cookieStr.match(
+                            /(?:__Secure-)?better-auth\.session_token=([^;]+)/
+                        );
+
+                        if (match && match[1]) {
+                            let rawToken = decodeURIComponent(match[1]);
+                            if (rawToken.startsWith("s:")) {
+                                rawToken = rawToken.slice(2).split(".")[0];
+                            } else if (rawToken.includes(".")) {
+                                rawToken = rawToken.split(".")[0];
+                            }
+
+                            const redirectUrl = new URL(
+                                locationHeader,
+                                process.env.CLIENT_URL ||
+                                    "https://studiospace-client-lime.vercel.app"
+                            );
+
+                            redirectUrl.searchParams.set("token", rawToken);
+                            res.setHeader("location", redirectUrl.toString());
+
+                            if (args[0] && typeof args[0] === "object") {
+                                if (args[0].Location) args[0].Location = redirectUrl.toString();
+                                if (args[0].location) args[0].location = redirectUrl.toString();
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Redirect token interceptor error:", e.message);
+                }
+            }
+            return originalWriteHead.apply(this, [statusCode, ...args]);
+        };
+    }
+    next();
+});
 
 // Better Auth Route Handler (Must be registered before express.json)
 app.all("/api/auth/{*any}", toNodeHandler(auth));
