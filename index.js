@@ -75,6 +75,23 @@ export const auth = betterAuth({
             enabled: true,
             trustedProviders: ["google"],
         },
+        storeStateStrategy: "database",
+        skipStateCookieCheck: true,
+    },
+
+    advanced: {
+        useSecureCookies: true,
+        defaultCookieAttributes: {
+            sameSite: "none",
+            secure: true,
+            partitioned: true,
+        },
+    },
+
+    onAPIError: {
+        errorURL:
+            process.env.CLIENT_URL ||
+            "https://studiospace-client-lime.vercel.app/login",
     },
 
     session: {
